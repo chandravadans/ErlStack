@@ -1,0 +1,195 @@
+-module(base_host_agent).
+-compile(export_all).
+-record(agent, {management_process_pid, hostname}).
+
+startAgent(Name)->
+    
+    Mgmtpid=global:whereis_name(cloud_manager),
+    Host=node(),
+    Agent=#agent{management_process_pid=Pid,hostname=Host},
+    %io:format("Agent with pid ~p and hostname ~p started!~n",[Pid,Host]).
+    MgmtPid=spawn(base_host_agent,base_host_agent,[Agent]),
+    %io:format("MgmtPid going to be registered as ~p",[MgmtPid]),
+    MgmtPid!{update_management_process_pid,MgmtPid},
+    global:register_name(Name,MgmtPid).
+
+%%Takes a list of option-value tuples and merges them into a single string
+list_to_string([],Acc)->
+    Acc;
+list_to_string(List,Acc) ->
+    [H|T]=List,
+    Prefix=" --",
+    Option=erlang:element(1,H),
+    Value=erlang:element(2,H),
+    Prefixed=string:concat(Prefix,Option),
+    Formattedval=string:concat(" ",Value),
+    Final=string:concat(Prefixed,Formattedval),
+    list_to_string(T,string:concat(Acc,Final)).
+
+base_host_agent(Agent1) ->
+    receive
+	{getDetails,Sender}->
+	    Sender!{Agent1}
+		;
+	{stop_agent} ->
+            %% Stop agent after sending log to management process at notice level 
+            Pid1 = Agent1#agent.management_process_pid,
+            Hostname1 = Agent1#agent.hostname,
+            Message1 = lists:flatten(io_lib:format("Agent on host ~p with Pid ~p is stopping.",
+						   [Hostname1, self()])),
+            Pid1 ! {log, {notice, Message1}},
+            ok;
+
+	{update_management_process_pid, New_pid} ->
+            %% Change Pid of management process to New_pid
+						%io:format("Changed pid from ~p to ~p~n",[Agent1#agent.management_process_pid,New_pid]),
+            Agent2 = Agent1#agent{management_process_pid=New_pid},
+	    New_pid,
+	    base_host_agent(Agent2);
+
+	{update_hostname, New_hostname} ->
+            %% Change hostname to New_hostname
+            Agent2=Agent1#agent{hostname=New_hostname},
+            base_host_agent(Agent2);
+
+	%% Functions pertaining to containers
+
+	{create_container, Sender,CTID, Options} ->
+            %% create container with "vzctl create CTID  --option value" command
+            %% Example message {create_container, Sender, Request_id, 101, 
+            %%             [{"hostname", "test.virtual-labs.ac.in"},
+            %%              {"ostemplate", "centos-6.3-x86_64"},
+            %%              {"ipaddr", "10.4.15.201"}]}
+            %% Results into command
+            %%    vzctl create 101 --hostname test.virtual-labs.ac.in 
+            %%          --ostemplate centos-6.3-x86_64 --ipadd 10.4.15.201
+	    Command="vzctl create ",
+            Containerid=integer_to_list(CTID),
+            Fixed=[Command]++Containerid,
+	    
+		Cmd=list_to_string(Options,Fixed),
+	    %io:format("Cmd is ~s~n",[Cmd]),
+        Returnval=os:cmd(Cmd),
+	    Sender!{Returnval},
+	    base_host_agent(Agent1);
+
+	{destroy_container,Sender, CTID} ->
+            %%Destroy container with given CTID
+	    Command="vzctl destroy ",
+	    Containerid=integer_to_list(CTID),
+	    Execute=[Command]++Containerid,
+	    ReturnVal=os:cmd(Execute),
+	    Sender!{ReturnVal},
+            base_host_agent(Agent1);	
+
+	{start_container,Sender, CTID} ->
+            %%Start container with given CTID
+	    Command="vzctl start ",
+	    Containerid=integer_to_list(CTID),
+	    Execute=[Command]++Containerid,
+	    ReturnVal=os:cmd(Execute),
+	    Sender!{ReturnVal},
+            base_host_agent(Agent1);	
+
+	{stop_container,Sender, CTID} ->
+            %%Stop container with given CTID
+	    Command="vzctl stop ",
+	    Containerid=integer_to_list(CTID),
+	    Execute=[Command]++Containerid,
+	    ReturnVal=os:cmd(Execute),
+	    Sender!{ReturnVal},
+            base_host_agent(Agent1);	
+
+
+	{get_container_list, Sender, Request_id} ->
+            %% Get list of containers on base machine using "vzlist -a" 
+	    OutStr=os:cmd("vzlist -a"),
+
+	    %%Check if root permissions are required
+	    case string:equal(OutStr,"This program can only be run under root.\n") of 
+		true -> 
+		    Sender!{Request_id,err_root_required},
+		    base_host_agent(Agent1);
+		false->
+
+		    Lines=string:tokens(OutStr,"\n"),
+		    [_|Container_list]=Lines,
+		    Sender ! {Request_id, Container_list},
+		    base_host_agent(Agent1)
+	    end; 
+
+	{get_num_containers, Sender, Request_id} ->
+            %% Get number of containers on host. Reply is in the form of {Req_id,Total_Containers,Running_Containers,Stopped_Containers} 
+	    All_containers=os:cmd("vzlist -a|wc -l"),
+
+	    %%Check if root permissions are required
+	    case string:equal(All_containers,"This program can only be run under root.\n") of 
+		true -> 
+		    Sender!{Request_id,err_root_needed},
+		    base_host_agent(Agent1);
+		false->
+		    %%Hack to strip out the \n and return a pure integer
+		    Num=re:replace(All_containers,"\n",""),	   
+		    [H|_]=Num,
+		    Total_number_of_containers=list_to_integer(binary_to_list(H))-1,
+
+		    %%Running Containers
+		    Running=os:cmd("vzlist|wc -l"),
+		    Num_running=re:replace(Running,"\n",""),
+		    [H1|_]=Num_running,
+		    Running_containers=list_to_integer(binary_to_list(H1))-1,
+
+		    %%Stopped containers
+		    Stopped=os:cmd("vzlist --stopped |wc -l"),
+		    Num_stopped=re:replace(Stopped,"\n",""),
+		    [H2|_]=Num_stopped,
+		    Stopped_containers=list_to_integer(binary_to_list(H2))-1,
+
+		    Sender!{Request_id,Total_number_of_containers,Running_containers,Stopped_containers},
+		    base_host_agent(Agent1)
+	    end; 
+
+	{modify_container, Sender,CTID, Options} ->
+            %% modify container with "vzctl set CTID  --option value" command
+            %% Example message {modify_container, Sender, Request_id, 101, 
+            %%             [{"onboot", "yes"},
+            %%              {"nameserver", "8.8.4.4"}]}
+            %% Results into command
+            %%    vzctl set 101 --onboot yes 
+            %%          --nameserver 8.8.4.4
+	    Command="vzctl set ",
+            Containerid=integer_to_list(CTID),
+            Fixed=[Command]++Containerid,
+	    Returnval=os:cmd(list_to_string(Options,Fixed)),
+	    %io:format("Result is ~s~n",[Returnval]),
+	    Sender!{Returnval},
+	    %%To see command printed out as a string
+	    %%io:format("~s~n",[lists:flatten(Command)]),
+            base_host_agent(Agent1);
+	
+	
+	%%Functions pertaining to VM's
+	{get_vm_list, Sender, Request_id} ->
+            %% Get list of VMs on base machine using "virsh list --all"
+            %% stub
+            VM_list=[4,5,6],
+            Sender ! {Request_id, VM_list},
+            base_host_agent(Agent1); 
+	
+	{stop_vm, VMID} ->
+	    %% Stop a running VM using "virsh destroy  {VMID|name}"
+	    %% stub
+	    base_host_agent(Agent1);
+
+	%% Similarly more functions for VMs, networks, etc. that are easily
+	%% achievable.
+
+	Any1 -> 
+            Pid1 = Agent1#agent.management_process_pid,
+            Hostname1=Agent1#agent.hostname,
+						%Message1=unknown_message,
+            Message1=lists:flatten(io_lib:format("Unknown message ~p received at base ~p.",[Any1, Hostname1])),
+            Pid1 ! {log, {info, Message1}},
+						%Pid1 ! {unknown},
+            base_host_agent(Agent1)
+    end.
