@@ -1,0 +1,12 @@
+body#body {
+background:white none repeat scroll 0 0;
+color:#333333;
+font-family:/*Tahoma,"Lucida Grande","Lucida Sans Unicode",*/Verdana,Arial,Helvetica,sans-serif,Verdana;
+margin:0;
+padding:0;
+text-align:center;
+}
+div#container {
+margin:auto;
+width:900px;
+}

@@ -1,0 +1,97 @@
+<html>
+  <head>
+    <title>Erlang Cloud</title>
+    <link rel="stylesheet" href="css/style.css" media="screen,print">
+  </head>
+  <body id="body">
+    <div id="container">
+      <erl>
+lf(A) ->
+    lists:flatten(A).
+
+out(Arg) ->
+    case global:whereis_name(cloud_manager) of  
+	undefined ->
+	    {ehtml, generate_ehtml("Internal error. cloud_manager is not registered.",[])};
+
+	Pid1 ->
+	    Pid1 ! {get_host_list,self()},
+	    receive
+		{Host_list} ->
+		    {ehtml,generate_ehtml("Container Details",Host_list)}
+
+	    after 2000 ->
+		    {ehtml, generate_ehtml("Internal Error. `Machine might be busy.",[])}
+	    end		
+    end .
+
+
+
+generate_rows([],L,Count) ->
+    L;
+generate_rows([{Pid,Hostname} | T ],L,Count) ->
+    generate_rows(T,L++[{tr,[{height,"50px"}],get_basedetail_column(Pid,Hostname,Count+1)}],Count+1).
+
+
+
+generate_ehtml(Message,Base_pid_list) ->
+    [
+     {table,[{style,"text-align:center"}],
+      [
+       {tr,[],
+	[
+	 {td,[{width,"300px"}],
+	  {a,[{href,"localhost:8081"}],
+	   {h1,[],"Home"}
+	  }
+	 },
+	 {td,[{width,"300px"}],{h1,[],"Containers"}},
+	 {td,[{width,"300px"}],{h1,[],"VMs"}}
+	]
+       }
+      ]
+     },
+     {h1,[],["Add a container"]},
+     {h4, [], Message},
+     {br},
+     
+    ].
+
+
+
+
+%% here Pid is the pid of the base machines. and Hostname contains name of the base machines.
+get_basedetail_column(Pid,Hostname,Count) ->
+    B=erlang:atom_to_list(Hostname),
+    Target1=lf(f("base_manager.yaws?hostname=~s", [B])),
+    [{td,[{width,"300px"}], {a, [{href, Target1}], B}},
+     {td,[{width,"300px"}],[get_num_containers(Pid)," Containers"]},
+     {td,[{width,"300px"}],[get_num_vms(Pid)," VMs"]}
+    ].
+
+
+
+get_num_containers(Pid) ->
+    Request_id1 = erlang:make_ref(),
+    Manager_pid1 = global:whereis_name(cloud_manager),
+    Manager_pid1 ! {get_container_list, self(), Pid, Request_id1},
+    receive
+	{Request_id1, {error, Reason1}} ->
+	    io:format("Error ~p encountered.~n", [Reason1]),
+	    "-1";
+
+	{Request_id1, Container_list1} ->
+	    io:format("Recieved container list~p~n", [Container_list1]),
+	    lists:flatten(io_lib:format("~p", [length(Container_list1)])) 
+
+    after 2000 ->
+	    io:format("No response received from cloud manager for get_container_list"),
+	    "-1" 
+    end. 
+
+
+
+      </erl>
+    </div>
+  </body>
+</html>

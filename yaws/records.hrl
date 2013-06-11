@@ -1,0 +1,2 @@
+-record(agent, {management_process_pid, hostname}).
+-record(manager, {host_agent_info}).
