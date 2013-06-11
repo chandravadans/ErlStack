@@ -1,0 +1,47 @@
+<html>
+  <head>
+    <title>Erlang Cloud</title>
+    <link rel="stylesheet" href="css/style.css" media="screen,print">
+  </head>
+  <body id="body">
+    <div id="container">
+      <erl>
+
+out(Arg) ->
+    case yaws_api:queryvar(Arg,"hostname") of
+	undefined -> generate_ehtml("Invalid Hostname");
+	{ok,Hostname} -> 
+	    {ehtml,generate_ehtml(Hostname)}
+    end.
+
+generate_ehtml(Message) ->
+    [
+     {table,[{style,"text-align:center"}],
+      [
+       {tr,[],
+	[
+	 {td,[{width,"300px"}],
+	  {a,[{href,"localhost:8081"}],
+	   {h1,[],"Home"}
+	  }
+	 },
+	 {td,[{width,"300px"}],{h1,[],"Containers"}},
+	 {td,[{width,"300px"}],{h1,[],"VMs"}}
+	]
+       }
+      ]
+     },
+     {h1,[],[Message]},
+     {h1, [], "Containers"},
+     {table,[],generate_container_row(Message)}
+    ].
+
+generate_container_row(Hostname) ->
+    [
+     "to be implemented"
+    ].
+
+      </erl>
+    </div>
+  </body>
+</html>

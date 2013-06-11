@@ -2,7 +2,7 @@
 -compile(export_all).
 -vsn(1.0).
 -description("This module is used to implement a host agent which will "
-	     "respond to host specific queries and commands sent by overall "
+	     "respond to host specific queries and commands sent by the "
 	     "cloud manager.").
 
 %%% This file includes definition of agent and manager records.
@@ -19,7 +19,12 @@ start()->
     Host=node(),
 
     %%Get pid of management process
+    
+    %%Have to put this back!
     Agent1=#agent{management_process_pid=get_manager(),hostname=Host},
+
+    %Just for testine. Have to remove this!
+    %Agent1=#agent{management_process_pid= null,hostname=Host},
 
     %%Start new base agent
     Q=spawn(fun() -> base_host_agent(Agent1) end),
@@ -130,7 +135,7 @@ base_host_agent(Agent1) ->
 	    Containerid=integer_to_list(CTID),
 	    Fixed=[Command]++Containerid,
 	    Result=list_to_string(Options,Fixed),
-	    Returnval=os:cmd(list_to_string(Options,Fixed)),
+	    Returnval=os:cmd(Result),
 						%io:format("Result is ~s~n",[Returnval]),
 	    Sender!{Returnval},
 	    %%To see command printed out as a string
@@ -216,8 +221,59 @@ base_host_agent(Agent1) ->
 	    %%io:format("~s~n",[lists:flatten(Command)]),
             base_host_agent(Agent1);
 
+	%%%Gets the hostname of container with CTID
+	{get_hostname,Sender,CTID,Request_id}->
+	    Container_id=erlang:integer_to_list(CTID),
+	    Filter1=string:concat(Container_id,"|tr -s \" \"|cut -f3 -d \" \" "),	    
+	    Filter=string:concat("vzlist -a -o ctid,hostname|grep ",Filter1),
+	    Hostname=os:cmd(Filter),
+	    Sender!{Request_id,Hostname},
+	    base_host_agent(Agent1);
 
+        %%%Gets the status of container with CTID
+	{get_status,Sender,CTID,Request_id}->
+	    Container_id=erlang:integer_to_list(CTID),
+	    Filter1=string:concat(Container_id,"|tr -s \" \"|cut -f3 -d \" \" "),	    
+	    Filter=string:concat("vzlist -a -o ctid,status|grep ",Filter1),
+	    Status=os:cmd(Filter),
+	    Sender!{Request_id,Status},
+	    base_host_agent(Agent1);
+	
+	%%%Gets the uptime of container with CTID
+	{get_uptime,Sender,CTID,Request_id}->
+	    Container_id=erlang:integer_to_list(CTID),
+	    Filter1=string:concat(Container_id,"|tr -s \" \"|cut -f3 -d \" \" "),	    
+	    Filter=string:concat("vzlist -a -o ctid,uptime|grep ",Filter1),
+	    Uptime=os:cmd(Filter),
+	    Sender!{Request_id,Uptime},
+	    base_host_agent(Agent1);
 
+	%%%Gets the template of container with CTID
+	{get_template,Sender,CTID,Request_id}->
+	    Container_id=erlang:integer_to_list(CTID),
+	    Filter1=string:concat(Container_id,"|tr -s \" \"|cut -f3 -d \" \" "),	    
+	    Filter=string:concat("vzlist -a -o ctid,ostemplate|grep ",Filter1),
+	    Template=os:cmd(Filter),
+	    Sender!{Request_id,Template},
+	    base_host_agent(Agent1);
+
+	%%%Gets the total memory of CTID
+	{get_total_memory,Sender,CTID,Request_id}->
+	    Container_id=erlang:integer_to_list(CTID),
+	    Filter1=string:concat(Container_id,"/meminfo | grep MemTotal|tr -s \" \"|cut -f2,3 -d \" \" "),	    
+	    Filter=string:concat("cat /proc/bc/",Filter1),
+	    Totmem=os:cmd(Filter),
+	    Sender!{Request_id,Totmem},
+	    base_host_agent(Agent1);
+
+       %%%Gets the free memory of CTID
+	{get_free_memory,Sender,CTID,Request_id}->
+	    Container_id=erlang:integer_to_list(CTID),
+	    Filter1=string:concat(Container_id,"/meminfo | grep MemFree|tr -s \" \"|cut -f2,3 -d \" \" "),	    
+	    Filter=string:concat("cat /proc/bc/",Filter1),
+	    Freemem=os:cmd(Filter),
+	    Sender!{Request_id,Freemem},
+	    base_host_agent(Agent1);
 
 	%% Similarly more functions for VMs, networks, etc. that are easily
 	%% achievable.
